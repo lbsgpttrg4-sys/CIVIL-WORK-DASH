@@ -302,18 +302,18 @@ if st.session_state.view == 'Home':
                     switch_view('Department', dept)
                     st.rerun()
 
-        # 4. Critical Issues Section
-        if total_issues > 0:
-            st.markdown("---")
-            st.subheader("⚠️ Critical Issues Alert")
+        # # 4. Critical Issues Section
+        # if total_issues > 0:
+        #     st.markdown("---")
+        #     st.subheader("⚠️ Critical Issues Alert")
             
-            # Show top 5 issues
-            issues_display = issues_df[["Department", "Work Name", "Issues", "Mandal"]].head(5)
-            st.dataframe(
-                issues_display, 
-                use_container_width=True, 
-                hide_index=True
-            )
+        #     # Show top 5 issues
+        #     issues_display = issues_df[["Department", "Work Name", "Issues", "Mandal"]].head(5)
+        #     st.dataframe(
+        #         issues_display, 
+        #         use_container_width=True, 
+        #         hide_index=True
+        #     )
 
 elif st.session_state.view == 'Department':
     # === DEPARTMENT VIEW ===
@@ -424,4 +424,5 @@ elif st.session_state.view == 'Department':
             use_container_width=True,
             hide_index=True,
             height=500
+
         )
