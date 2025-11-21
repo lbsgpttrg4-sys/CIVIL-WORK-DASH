@@ -8,7 +8,7 @@ import io
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
-    page_title="CIVIL WORKS SUMMARY - CM Dashboard",
+    page_title="CIVIL WORKS SUMMARY",
     page_icon="🏛️",
     layout="wide"
 )
@@ -426,3 +426,4 @@ elif st.session_state.view == 'Department':
             height=500
 
         )
+
