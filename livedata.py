@@ -237,6 +237,13 @@ if data_sheets:
 # 1. Main Header
 st.markdown('<div class="main-header">Civil Works Dashboard</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-header">Kataram Division - Summary Overview</div>', unsafe_allow_html=True)
+sheet_url = "https://docs.google.com/spreadsheets/d/13Um7uOhz_zAAvMqCpfO-tppyZPoRT6RK/edit?usp=sharing&ouid=107329449050851078771&rtpof=true&sd=true"
+
+st.markdown(
+    f'<div class="sub-link"><a href="{sheet_url}" target="_blank">🔗 Open Google Sheet</a></div>',
+    unsafe_allow_html=True
+)
+
 
 if st.session_state.view == 'Home':
     if master_df.empty:
