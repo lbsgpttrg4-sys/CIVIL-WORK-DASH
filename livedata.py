@@ -52,6 +52,23 @@ st.markdown("""
 
 # --- HELPER FUNCTIONS ---
 
+# def normalize_budget(value):
+#     """Standardizes budget strings to Float (Lakhs)."""
+#     if pd.isna(value):
+#         return 0.0
+#     s_val = str(value).lower().replace(',', '').strip()
+#     numeric_part = re.findall(r"[-+]?\d*\.\d+|\d+", s_val)
+#     if not numeric_part:
+#         return 0.0
+#     number = float(numeric_part[0])
+#     if "crore" in s_val or "cr" in s_val:
+#         return number * 100
+#     elif "lakh" in s_val:
+#         return number
+#     elif number > 10000: 
+#         return number / 100000
+#     else:
+#         return number
 def normalize_budget(value):
     """Standardizes budget strings to Float (Lakhs)."""
     if pd.isna(value):
@@ -451,3 +468,4 @@ elif st.session_state.view == 'Department':
             height=500,
             column_config=table_config
         )
+
