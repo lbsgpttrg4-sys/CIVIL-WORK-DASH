@@ -6,6 +6,13 @@ import re
 import requests
 import io
 
+# --- CONFIGURATION ---
+PRIMARY_COLOR = "#1E3A8A" # Dark professional blue
+SECONDARY_COLOR = "#4B5563" # Muted text gray
+BACKGROUND_COLOR = "#F0F2F6" # Very light background
+CARD_COLOR = "#FFFFFF"
+COLOR_SEQUENCE = ["#1E3A8A", "#636EF5", "#A3A7F4", "#C6C9F9", "#00A86B", "#FFD700", "#DC3545"] # Expanded sequence for charts
+
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
     page_title="Civil Works Dashboard",
@@ -13,42 +20,105 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- CUSTOM CSS ---
-st.markdown("""
+# --- CUSTOM CSS (Professional Styling) ---
+st.markdown(f"""
     <style>
-    .block-container {
+    /* Global overrides for a clean look */
+    .stApp {{
+        background-color: {BACKGROUND_COLOR};
+    }}
+    .block-container {{
         padding-top: 2rem;
         padding-bottom: 1rem;
-    }
-    .metric-card {
-        background-color: #ffffff;
-        border: 1px solid #e0e0e0;
-        border-radius: 8px;
-        padding: 15px;
-        text-align: center;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-    }
-    .stButton button {
-        width: 100%;
-        height: 3.5rem;
-        font-weight: bold;
-        border-radius: 8px;
-    }
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: 700;
-        color: #1E3A8A;
+    }}
+
+    /* 1. Main Headers */
+    .main-header {{
+        font-size: 2.8rem;
+        font-weight: 800;
+        color: {PRIMARY_COLOR};
         text-align: center;
         margin-bottom: 0rem;
-    }
-    .sub-header {
+    }}
+    .sub-header {{
         font-size: 1.2rem;
-        color: #64748B;
+        color: {SECONDARY_COLOR};
         text-align: center;
         margin-bottom: 2rem;
-    }
+    }}
+    
+    /* 2. Metric Cards (KPIs) - Targetting Streamlit's stMetric class */
+    .stMetric {{
+        background-color: {CARD_COLOR};
+        border: 1px solid #E5E7EB;
+        border-radius: 10px;
+        padding: 15px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }}
+    .stMetric label {{ /* Metric Title */
+        font-size: 1.1rem;
+        color: {SECONDARY_COLOR};
+        font-weight: 600;
+    }}
+    .stMetric div[data-testid="stMetricValue"] {{ /* Metric Value */
+        font-size: 2.5rem;
+        color: {PRIMARY_COLOR};
+        font-weight: 700;
+    }}
+    
+    /* 3. Department Buttons */
+    .stButton button {{
+        width: 100%;
+        height: 4rem; /* Increased height for prominence */
+        font-weight: bold;
+        border-radius: 10px;
+        background-color: {PRIMARY_COLOR};
+        color: white;
+        border: none;
+        transition: all 0.2s;
+    }}
+    .stButton button:hover {{
+        background-color: #0F377A; /* Darker shade on hover */
+    }}
+    
+    /* 4. Chart Headers (Used for st.subheader) */
+    h2 {{
+        color: {PRIMARY_COLOR};
+        border-bottom: 2px solid #E5E7EB;
+        padding-bottom: 5px;
+        margin-top: 1.5rem;
+    }}
+    
+    /* 5. Link Style */
+    .sub-link a {{
+        color: #64748B;
+        text-decoration: none;
+        font-size: 0.9rem;
+        display: block;
+        text-align: center;
+        margin-bottom: 2rem;
+    }}
     </style>
 """, unsafe_allow_html=True)
+
+
+# --- PLOTLY CONFIGURATION (Professional Theme and Text Size) ---
+# Define a base layout template for clean, readable charts
+BASE_LAYOUT = go.Layout(
+    template='plotly_white', # Professional white theme
+    font=dict(size=12, family="Arial"), # Consistent global font size
+    title_font_size=18,
+    legend_font_size=12,
+    xaxis=dict(title_font_size=14, tickfont_size=12),
+    yaxis=dict(title_font_size=14, tickfont_size=12),
+    hoverlabel=dict(font_size=12) # Consistent hover text size
+)
+
+def update_fig_layout(fig):
+    """Applies the base layout and professional styling to a Plotly figure."""
+    fig.update_layout(BASE_LAYOUT)
+    fig.update_traces(marker=dict(line=dict(width=0.5, color='DarkSlateGrey'))) # Subtle borders on traces
+    return fig
 
 # --- PROJECT CATEGORIZATION LOGIC ---
 def categorize_project_revised(description):
@@ -229,6 +299,13 @@ if 'view' not in st.session_state:
     st.session_state.view = 'Home'
 if 'selected_dept' not in st.session_state:
     st.session_state.selected_dept = None
+# Initialize session state for data
+if 'data_sheets' not in st.session_state:
+    st.session_state.data_sheets = {}
+if 'last_source' not in st.session_state:
+    st.session_state.last_source = None
+if 'uploaded_file_hash' not in st.session_state:
+    st.session_state.uploaded_file_hash = None
 
 def switch_view(view_name, dept=None):
     st.session_state.view = view_name
@@ -238,37 +315,63 @@ def switch_view(view_name, dept=None):
 st.sidebar.header("Data Source")
 source_option = st.sidebar.radio("Select Source:", ["Google Sheet (Live)", "Upload Excel File", "Use Demo Data"])
 
-data_sheets = {}
 SHEET_ID = "13Um7uOhz_zAAvMqCpfO-tppyZPoRT6RK"
 
+# Logic to determine if a refresh/re-load is needed (e.g., source changed)
+needs_reload = False
+if source_option != st.session_state.last_source:
+    needs_reload = True
+    st.session_state.last_source = source_option
+
 if source_option == "Google Sheet (Live)":
-    if st.sidebar.button("🔄 Refresh Data"):
+    # Reload if the button is pressed, or if it's the first time running this source AND no data exists
+    if st.sidebar.button("🔄 Refresh Data") or (needs_reload and not st.session_state.data_sheets):
         st.cache_data.clear()
-    with st.spinner('Fetching data from Google Sheets...'):
-        excel_file = fetch_google_sheet(SHEET_ID)
-        if excel_file:
-            raw_sheets = load_data(excel_file)
-            if raw_sheets:
-                for sheet_name, df in raw_sheets.items():
-                    data_sheets[sheet_name] = clean_dataframe(df, sheet_name)
-                st.sidebar.success("Data Loaded Successfully!")
+        with st.spinner('Fetching data from Google Sheets...'):
+            excel_file = fetch_google_sheet(SHEET_ID)
+            if excel_file:
+                raw_sheets = load_data(excel_file)
+                if raw_sheets:
+                    temp_data_sheets = {sheet_name: clean_dataframe(df, sheet_name) for sheet_name, df in raw_sheets.items()}
+                    st.session_state.data_sheets = temp_data_sheets
+                    st.sidebar.success("Data Loaded Successfully!")
 
 elif source_option == "Upload Excel File":
     uploaded_file = st.sidebar.file_uploader("Upload Kataram Civil Works Excel", type=["xlsx", "xls"])
-    if uploaded_file:
-        raw_sheets = load_data(uploaded_file)
-        if raw_sheets:
-            for sheet_name, df in raw_sheets.items():
-                data_sheets[sheet_name] = clean_dataframe(df, sheet_name)
-    else:
+    
+    uploaded_file_hash = uploaded_file.file_id if uploaded_file else None
+    
+    # Reload if a new file is uploaded (different hash) or if the source changed
+    if uploaded_file and (uploaded_file_hash != st.session_state.uploaded_file_hash or needs_reload):
+        with st.spinner('Processing uploaded file...'):
+            raw_sheets = load_data(uploaded_file)
+            if raw_sheets:
+                temp_data_sheets = {sheet_name: clean_dataframe(df, sheet_name) for sheet_name, df in raw_sheets.items()}
+                st.session_state.data_sheets = temp_data_sheets
+                st.session_state.uploaded_file_hash = uploaded_file_hash
+                st.sidebar.success("File Processed Successfully!")
+    elif not st.session_state.data_sheets:
         st.info("Please upload an Excel file to begin.")
-        st.stop()
-else:
-    data_sheets = get_mock_data()
+        
+else: # Use Demo Data
+    if needs_reload or not st.session_state.data_sheets:
+        st.session_state.data_sheets = get_mock_data()
+        st.sidebar.info("Using Demo Data.")
 
-master_df = pd.DataFrame()
-if data_sheets:
-    master_df = pd.concat(data_sheets.values(), ignore_index=True)
+# Stop if no data is loaded
+if not st.session_state.data_sheets:
+    if source_option != "Upload Excel File": # Allow upload widget to persist
+        st.stop()
+    else:
+        # If it's an upload but no file has been processed yet, stop execution
+        if not uploaded_file: 
+            st.stop()
+
+
+# Alias the session state data for easier access in the rest of the script
+data_sheets = st.session_state.data_sheets
+master_df = pd.concat(data_sheets.values(), ignore_index=True)
+
 
 # --- APPLY PROJECT CATEGORIZATION ---
 if not master_df.empty and "Work Name" in master_df.columns:
@@ -283,7 +386,7 @@ st.markdown('<div class="sub-header">Kataram Division - Summary Overview</div>',
 sheet_url = "https://docs.google.com/spreadsheets/d/13Um7uOhz_zAAvMqCpfO-tppyZPoRT6RK/edit?usp=sharing&ouid=107329449050851078771&rtpof=true&sd=true"
 
 st.markdown(
-    f'<div class="sub-link"><a href="{sheet_url}" target="_blank">🔗 Open Google Sheet</a></div>',
+    f'<div class="sub-link"><a href="{sheet_url}" target="_blank">🔗 Open Source Data Sheet</a></div>',
     unsafe_allow_html=True
 )
 
@@ -320,7 +423,6 @@ if st.session_state.view == 'Home':
             c1, c2 = st.columns(2)
             
             with c1:
-                # --- REPLACING Budget Allocation Chart with Project Type Treemap ---
                 st.subheader("🛠️ Project Count by Type")
                 
                 if "Project Type" in master_df.columns:
@@ -333,7 +435,8 @@ if st.session_state.view == 'Home':
                         path=[px.Constant("All Projects"), 'Department', 'Project Type'], 
                         values='Count',
                         color='Project Type',
-                        title=""
+                        title="",
+                        color_discrete_sequence=COLOR_SEQUENCE
                     )
                     
                     # Customize hover text and appearance
@@ -341,17 +444,16 @@ if st.session_state.view == 'Home':
                     fig_treemap.data[0].hovertemplate = (
                         '<b>%{label}</b><br>' +
                         'Projects: %{value}<br>' +
-                        'Total: %{percentRoot:.1f}%<extra></extra>' # percentRoot is percentage of total 'All Projects'
+                        'Total: %{percentRoot:.1f}%<extra></extra>' 
                     )
-                    # Update layout to remove top-level 'All Projects' padding for cleaner look
+                    # Apply professional styling and increased font size for readability
+                    fig_treemap = update_fig_layout(fig_treemap)
                     fig_treemap.update_traces(textfont=dict(size=14))
                     fig_treemap.update_layout(margin = dict(t=0, l=0, r=0, b=0))
-                    
                     
                     st.plotly_chart(fig_treemap, use_container_width=True)
                 else:
                     st.info("Work Name column is not available to categorize projects.")
-                # --- END Treemap Logic ---
 
             with c2:
                 st.subheader("📊 Project Status by Dept")
@@ -360,9 +462,12 @@ if st.session_state.view == 'Home':
                 status_by_dept["Percentage"] = (status_by_dept["Count"] / dept_totals * 100).fillna(0)
                 status_by_dept["Label"] = status_by_dept.apply(lambda x: f"{x['Count']}<br>({x['Percentage']:.0f}%)", axis=1)
                 
-                color_map = {"Completed": "#28a745", "In Progress": "#dc3545", "N/A": "#6c757d"}
+                color_map = {"Completed": "#28a745", "In Progress": "#DC3545", "N/A": "#6c757d"} # Green/Red/Gray for status
                 fig_status = px.bar(status_by_dept, x="Department", y="Count", color="Status Label", color_discrete_map=color_map, text="Label", barmode="stack", title="")
-                fig_status.update_traces(textposition='inside', insidetextanchor='middle')
+                
+                # Apply professional styling and increased font size
+                fig_status = update_fig_layout(fig_status)
+                fig_status.update_traces(textposition='inside', insidetextanchor='middle', textfont=dict(size=12))
                 st.plotly_chart(fig_status, use_container_width=True)
 
             st.subheader("⚠️ Issues by Department")
@@ -372,8 +477,10 @@ if st.session_state.view == 'Home':
                 issues_count["Percentage"] = (issues_count["Count"] / total_issues_val * 100).fillna(0)
                 issues_count["Label"] = issues_count.apply(lambda x: f"{x['Count']}<br>({x['Percentage']:.1f}%)", axis=1)
                 
-                fig_issues = px.bar(issues_count, x="Department", y="Count", color="Department", text="Label", title="")
-                fig_issues.update_traces(textposition='outside')
+                fig_issues = px.bar(issues_count, x="Department", y="Count", color="Department", text="Label", title="", color_discrete_sequence=COLOR_SEQUENCE)
+                # Apply professional styling and increased font size
+                fig_issues = update_fig_layout(fig_issues)
+                fig_issues.update_traces(textposition='outside', textfont=dict(size=12))
                 st.plotly_chart(fig_issues, use_container_width=True)
             else:
                 st.info("No reported issues found.")
@@ -428,7 +535,7 @@ elif st.session_state.view == 'Department':
     else:
         h1, h2 = st.columns([1, 5])
         with h1:
-            if st.button("⬅️ Back"):
+            if st.button("⬅️ Back to Summary"):
                 switch_view('Home')
                 st.rerun()
         with h2:
@@ -440,7 +547,7 @@ elif st.session_state.view == 'Department':
         sel_mandal = f1.selectbox("Filter by Mandal", mandals)
         show_pending = f2.toggle("Pending Only")
         show_issues = f3.toggle("Issues Only")
-        show_priority = f4.toggle("⭐ Priority Only") # New Priority Toggle
+        show_priority = f4.toggle("⭐ Priority Only") 
 
         filtered_df = df.copy()
         if sel_mandal != "All":
@@ -475,9 +582,11 @@ elif st.session_state.view == 'Department':
             with dc1:
                 status_counts = filtered_df["Status Label"].value_counts().reset_index()
                 status_counts.columns = ["Status", "Count"]
-                color_map = {"Completed": "#28a745", "In Progress": "#dc3545", "N/A": "#6c757d"}
+                color_map = {"Completed": "#28a745", "In Progress": "#DC3545", "N/A": "#6c757d"}
                 fig_dept_pie = px.pie(status_counts, values='Count', names='Status', hole=0.4, color='Status', color_discrete_map=color_map, title="Completion Status")
-                fig_dept_pie.update_traces(textinfo='value+percent')
+                # Apply professional styling and increased font size
+                fig_dept_pie = update_fig_layout(fig_dept_pie)
+                fig_dept_pie.update_traces(textinfo='value+percent', textfont=dict(size=12))
                 st.plotly_chart(fig_dept_pie, use_container_width=True)
             with dc2:
                 if "Mandal" in filtered_df.columns and "Normalized Budget" in filtered_df.columns:
@@ -485,15 +594,17 @@ elif st.session_state.view == 'Department':
                     total_dept_budget = budget_mandal["Normalized Budget"].sum()
                     budget_mandal["Percentage"] = (budget_mandal["Normalized Budget"] / total_dept_budget * 100).fillna(0)
                     budget_mandal["Label"] = budget_mandal.apply(lambda x: f"₹{x['Normalized Budget']:,.0f}L<br>({x['Percentage']:.1f}%)", axis=1)
-                    fig_dept_bar = px.bar(budget_mandal, x="Mandal", y="Normalized Budget", title="Budget by Mandal", text="Label")
-                    fig_dept_bar.update_traces(textposition='outside')
+                    fig_dept_bar = px.bar(budget_mandal, x="Mandal", y="Normalized Budget", title="Budget by Mandal", text="Label", color_discrete_sequence=COLOR_SEQUENCE)
+                    # Apply professional styling and increased font size
+                    fig_dept_bar = update_fig_layout(fig_dept_bar)
+                    fig_dept_bar.update_traces(textposition='outside', textfont=dict(size=12))
                     st.plotly_chart(fig_dept_bar, use_container_width=True)
         
         st.markdown("#### Detailed Works List")
         
         # TABLE CONFIGURATION
         # 1. Hide Normalized Budget, Status Label, Department, Priority, Is Completed
-        cols_to_hide = ["Normalized Budget", "Status Label", "Department", "Priority", "Is Completed", "Project Type"] # Added Project Type to hidden columns
+        cols_to_hide = ["Normalized Budget", "Status Label", "Department", "Priority", "Is Completed", "Project Type"] 
         
         # 2. Prioritize Column Order: Sl. No, Work Name, Village, Mandal, Status...
         desired_order = ["Sl. No.", "Work Name", "Village", "Mandal", "Status", "Budget (Lakhs)", "Issues", "Contractor", "Sanction Date"]
