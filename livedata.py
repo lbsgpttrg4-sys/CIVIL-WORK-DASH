@@ -50,8 +50,45 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- HELPER FUNCTIONS ---
+# --- PROJECT CATEGORIZATION LOGIC ---
+def categorize_project_revised(description):
+    """
+    Categorizes a project description into one of the predefined types.
+    """
+    desc = str(description).upper()
+    
+    # 1. AWC Building
+    if 'ANGANWADI' in desc or 'AWC' in desc:
+        return 'AWC Building'
+    
+    # 2. Medical Building (Health facilities/hospitals/colleges)
+    if 'HOSPITAL' in desc or 'PHC' in desc or 'SUB HEALTH CENTER' in desc or ('MEDICAL' in desc and ('COLLEGE' in desc or 'HEALTH' in desc)):
+        return 'Medical Building'
+    
+    # 3. School/Hostel/Education Building
+    if 'SCHOOL' in desc or 'KGBV' in desc or 'ZPHS' in desc or 'HOSTEL' in desc or 'PATASHALA' in desc or 'EDUCATION' in desc or 'LIBRARY' in desc:
+        return 'School/Hostel'
+    
+    # 4. Water/Borewell
+    if 'BORE WELL' in desc or 'SUBMERSIBLE PUMPSET' in desc or 'WATER SUPPLY' in desc or 'RWS' in desc or 'SUMP' in desc or 'OVERHEAD' in desc or 'PIPELINE' in desc:
+        return 'Water/Borewell'
+    
+    # 5. CC Road/Drain
+    if 'CC ROAD' in desc or 'CC DRAIN' in desc or 'SIDE DRAIN' in desc:
+        return 'CC Road/Drain'
+    
+    # 6. Major Road/Bridge
+    if 'PWD ROAD' in desc or 'ZP ROAD' in desc or 'RNB' in desc or 'RENEWAL' in desc or 'WIDENING' in desc or 'STRENGTHENING' in desc or 'BRIDGE' in desc or 'ROAD' in desc or 'R/F' in desc or 'IMPROVEMENTS' in desc:
+        return 'Major Road/Bridge'
+    
+    # 7. Other Building/Civil Works (General/Miscellaneous buildings, including quarters)
+    if 'BUILDING' in desc or 'GP' in desc or 'MPP' in desc or 'COMMUNITY HALL' in desc or 'MARKET' in desc or 'BUS STAND SHELTER' in desc or 'TEMPLE' in desc or 'MASJID' in desc or 'COMPLEX' in desc or 'WALL' in desc or 'PACS' in desc or 'ARCH GATE' in desc or 'PILGRIM SHED' in desc or 'PRASADAM COUNTERS' in desc or 'KALYANA KATTA' in desc or 'VAIKUNTA DHAMAM' in desc or 'COMPOUND WALL' in desc or 'ELECTRICAL' in desc or 'VIGRAHAM' in desc or 'HARATHI' in desc or 'PILLARS' in desc or 'CONSTRUCTION OF' in desc or 'BALANCE WORK' in desc or 'FORMATION' in desc or 'QUARTERS' in desc or 'RESIDENTIAL' in desc:
+        return 'Other Building/Civil Works'
+        
+    return 'Uncategorized'
 
+
+# --- HELPER FUNCTIONS ---
 
 def normalize_budget(value):
     """Standardizes budget strings to Float (Lakhs)."""
@@ -233,6 +270,11 @@ master_df = pd.DataFrame()
 if data_sheets:
     master_df = pd.concat(data_sheets.values(), ignore_index=True)
 
+# --- APPLY PROJECT CATEGORIZATION ---
+if not master_df.empty and "Work Name" in master_df.columns:
+    master_df["Project Type"] = master_df["Work Name"].apply(categorize_project_revised)
+
+
 # --- DASHBOARD LOGIC ---
 
 # 1. Main Header
@@ -278,15 +320,38 @@ if st.session_state.view == 'Home':
             c1, c2 = st.columns(2)
             
             with c1:
-                st.subheader("💰 Budget Allocation by Dept")
-                budget_by_dept = master_df.groupby("Department")["Normalized Budget"].sum().reset_index()
-                total_budget_val = budget_by_dept["Normalized Budget"].sum()
-                budget_by_dept["Percentage"] = (budget_by_dept["Normalized Budget"] / total_budget_val * 100).fillna(0)
-                budget_by_dept["Label"] = budget_by_dept.apply(lambda x: f"₹{x['Normalized Budget']:,.0f}L<br>({x['Percentage']:.1f}%)", axis=1)
+                # --- REPLACING Budget Allocation Chart with Project Type Treemap ---
+                st.subheader("🛠️ Project Count by Type")
                 
-                fig_budget = px.bar(budget_by_dept, x="Department", y="Normalized Budget", text="Label", color="Department", title="")
-                fig_budget.update_traces(textposition='outside')
-                st.plotly_chart(fig_budget, use_container_width=True)
+                if "Project Type" in master_df.columns:
+                    # Group by Department and Project Type for hierarchical treemap
+                    project_type_counts = master_df.groupby(["Department", "Project Type"]).size().reset_index(name="Count")
+                    
+                    # Treemap
+                    fig_treemap = px.treemap(
+                        project_type_counts, 
+                        path=[px.Constant("All Projects"), 'Department', 'Project Type'], 
+                        values='Count',
+                        color='Project Type',
+                        title=""
+                    )
+                    
+                    # Customize hover text and appearance
+                    fig_treemap.data[0].textinfo = 'label+value'
+                    fig_treemap.data[0].hovertemplate = (
+                        '<b>%{label}</b><br>' +
+                        'Projects: %{value}<br>' +
+                        'Total: %{percentRoot:.1f}%<extra></extra>' # percentRoot is percentage of total 'All Projects'
+                    )
+                    # Update layout to remove top-level 'All Projects' padding for cleaner look
+                    fig_treemap.update_traces(textfont=dict(size=14))
+                    fig_treemap.update_layout(margin = dict(t=0, l=0, r=0, b=0))
+                    
+                    
+                    st.plotly_chart(fig_treemap, use_container_width=True)
+                else:
+                    st.info("Work Name column is not available to categorize projects.")
+                # --- END Treemap Logic ---
 
             with c2:
                 st.subheader("📊 Project Status by Dept")
@@ -428,7 +493,7 @@ elif st.session_state.view == 'Department':
         
         # TABLE CONFIGURATION
         # 1. Hide Normalized Budget, Status Label, Department, Priority, Is Completed
-        cols_to_hide = ["Normalized Budget", "Status Label", "Department", "Priority", "Is Completed"]
+        cols_to_hide = ["Normalized Budget", "Status Label", "Department", "Priority", "Is Completed", "Project Type"] # Added Project Type to hidden columns
         
         # 2. Prioritize Column Order: Sl. No, Work Name, Village, Mandal, Status...
         desired_order = ["Sl. No.", "Work Name", "Village", "Mandal", "Status", "Budget (Lakhs)", "Issues", "Contractor", "Sanction Date"]
@@ -452,5 +517,3 @@ elif st.session_state.view == 'Department':
             height=500,
             column_config=table_config
         )
-
-
