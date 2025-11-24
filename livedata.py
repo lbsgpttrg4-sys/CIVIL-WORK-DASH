@@ -456,17 +456,51 @@ if st.session_state.view == 'Home':
                     st.info("Work Name column is not available to categorize projects.")
 
             with c2:
-                st.subheader("📊 Project Status by Dept")
+                st.subheader("📊 Project Status by Dept (100% Stacked)")
                 status_by_dept = master_df.groupby(["Department", "Status Label"]).size().reset_index(name="Count")
                 dept_totals = status_by_dept.groupby("Department")["Count"].transform("sum")
+                
+                # Calculate total works per department for X-axis label
+                total_works_per_dept = master_df.groupby("Department").size().reset_index(name="Total Works")
+                total_works_per_dept = total_works_per_dept.sort_values(by="Department") # Ensure sorting matches plot
+                
+                # Prepare custom tick labels
+                dept_tickvals = total_works_per_dept["Department"].tolist()
+                dept_ticktext = [f"{dept}<br>({count} works)" for dept, count in zip(dept_tickvals, total_works_per_dept["Total Works"])]
+                
+                # Ensure percentage is calculated for each department
                 status_by_dept["Percentage"] = (status_by_dept["Count"] / dept_totals * 100).fillna(0)
+                # Label contains both count and percentage
                 status_by_dept["Label"] = status_by_dept.apply(lambda x: f"{x['Count']}<br>({x['Percentage']:.0f}%)", axis=1)
                 
                 color_map = {"Completed": "#28a745", "In Progress": "#DC3545", "N/A": "#6c757d"} # Green/Red/Gray for status
-                fig_status = px.bar(status_by_dept, x="Department", y="Count", color="Status Label", color_discrete_map=color_map, text="Label", barmode="stack", title="")
                 
-                # Apply professional styling and increased font size
+                fig_status = px.bar(
+                    status_by_dept, 
+                    x="Department", 
+                    y="Percentage", 
+                    color="Status Label", 
+                    color_discrete_map=color_map, 
+                    text="Label", 
+                    barmode="stack", 
+                    title=""
+                )
+                
+                # Apply professional styling
                 fig_status = update_fig_layout(fig_status)
+                
+                # Customization for the X-axis labels
+                fig_status.update_layout(
+                    xaxis=dict(
+                        tickmode='array',
+                        tickvals=dept_tickvals,
+                        ticktext=dept_ticktext,
+                        title_text="Department" # Override default title
+                    ),
+                    yaxis_tickformat='.0f', 
+                    yaxis_title='Percentage of Total Projects'
+                )
+
                 fig_status.update_traces(textposition='inside', insidetextanchor='middle', textfont=dict(size=12))
                 st.plotly_chart(fig_status, use_container_width=True)
 
