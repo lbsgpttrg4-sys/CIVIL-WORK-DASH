@@ -8,17 +8,16 @@ import io
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
-    page_title="CIVIL WORKS SUMMARY",
+    page_title="Civil Works Dashboard",
     page_icon="🏛️",
     layout="wide"
 )
 
-# --- CUSTOM CSS FOR "CM DASHBOARD" LOOK ---
+# --- CUSTOM CSS ---
 st.markdown("""
     <style>
-    /* Fixed: Increased top padding to prevent title clipping */
     .block-container {
-        padding-top: 3rem;
+        padding-top: 2rem;
         padding-bottom: 1rem;
     }
     .metric-card {
@@ -35,14 +34,12 @@ st.markdown("""
         font-weight: bold;
         border-radius: 8px;
     }
-    /* Custom header style */
     .main-header {
         font-size: 2.5rem;
         font-weight: 700;
-        color: #1E3A8A; /* Dark Blue */
+        color: #1E3A8A;
         text-align: center;
-        margin-bottom: 1rem;
-        margin-top: 0rem;
+        margin-bottom: 0rem;
     }
     .sub-header {
         font-size: 1.2rem;
@@ -89,6 +86,8 @@ def clean_dataframe(df, dept_name=None):
         elif "completed" in c_lower: col_map[col] = "Is Completed"
         elif "admin sanction date" in c_lower: col_map[col] = "Sanction Date"
         elif "scheme" in c_lower: col_map[col] = "Scheme"
+        elif "priority" in c_lower: col_map[col] = "Priority"
+        elif "sl. no" in c_lower: col_map[col] = "Sl. No."
 
     df = df.rename(columns=col_map)
     
@@ -102,15 +101,35 @@ def clean_dataframe(df, dept_name=None):
     else:
         df["Normalized Budget"] = 0.0
 
-    # Clean Completion Status
-    if "Status" in df.columns:
-        df["Status Label"] = df["Status"].astype(str).apply(
-            lambda x: "Completed" if "complete" in x.lower() else "In Progress"
-        )
-    elif "Is Completed" in df.columns:
-        df["Status Label"] = df["Is Completed"].apply(lambda x: "Completed" if x == 1 else "In Progress")
+    # Clean Mandal
+    if "Mandal" in df.columns:
+        df["Mandal"] = df["Mandal"].fillna("N/A")
+        df["Mandal"] = df["Mandal"].astype(str).str.strip().str.title()
+        df.loc[df["Mandal"].isin(["Nan", "NaN", "", "None", "Nat"]), "Mandal"] = "N/A"
     else:
-         df["Status Label"] = "In Progress"
+        df["Mandal"] = "N/A"
+
+    # Clean Priority (Ensure 0 or 1)
+    if "Priority" not in df.columns:
+        df["Priority"] = 0
+    else:
+        # Convert to numeric, errors become NaN, then fill with 0
+        df["Priority"] = pd.to_numeric(df["Priority"], errors='coerce').fillna(0).astype(int)
+
+    # Clean Completion Status
+    def determine_status(row):
+        if "Is Completed" in row and row["Is Completed"] == 1:
+            return "Completed"
+        if "Status" in row:
+            val = str(row["Status"]).lower().strip()
+            if val in ["nan", "none", "", "nat"]:
+                return "N/A"
+            if "complete" in val:
+                return "Completed"
+            return "In Progress"
+        return "N/A"
+
+    df["Status Label"] = df.apply(determine_status, axis=1)
 
     # Clean Issues
     if "Issues" in df.columns:
@@ -130,7 +149,6 @@ def load_data(file_obj):
 
 @st.cache_data(ttl=600)
 def fetch_google_sheet(sheet_id):
-    """Downloads the Excel file from Google Sheets and returns it as a BytesIO object."""
     url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
     try:
         response = requests.get(url)
@@ -145,20 +163,23 @@ def fetch_google_sheet(sheet_id):
 
 # --- MOCK DATA ---
 def get_mock_data():
-    # Mock data as fallback
     pr_df = pd.DataFrame({
+        "Sl. No.": [1, 2, 3, 4, 5],
         "Work Name": ["PWD Road T02", "ZP Road Vajenepalli", "ZP Road Lingapur", "Anganwadi Center 1", "Anganwadi Center 2"],
-        "Mandal": ["Mahamutharam", "Mahamutharam", "Mahamutharam", "Mahamutharam", "Mahamutharam"],
+        "Mandal": ["Mahamutharam", "mahamutharam", "Mahamutharam", "", "Mahamutharam"],
         "Budget (Lakhs)": [60, 180, 93, 16, 16],
-        "Status": ["Progress", "Progress", "Progress", "Completed", "Progress"],
+        "Status": ["Progress", "Progress", "Progress", "Completed", ""],
         "Issues": ["", "Land Acquisition", "", "", "Funds"],
+        "Priority": [0, 1, 0, 0, 1] # Mock priority
     })
     med_df = pd.DataFrame({
+        "Sl. No.": [1, 2, 3, 4],
         "Work Name": ["Nursing College", "Critical Care Block", "Sub Centre Regonda", "Sub Centre Thirumalagiri"],
         "Mandal": ["Bhupalpally", "Bhupalpally", "Regonda", "Regonda"],
         "Budget (Lakhs)": [2600, 2375, 20, 20],
         "Status": ["Retaining wall", "Painting", "Completed", "Completed"],
         "Issues": ["Site Dispute", "", "", ""],
+        "Priority": [1, 1, 0, 0] # Mock priority
     })
     return {
         "PR": clean_dataframe(pr_df, "PR"),
@@ -175,7 +196,7 @@ def switch_view(view_name, dept=None):
     st.session_state.view = view_name
     st.session_state.selected_dept = dept
 
-# --- DATA LOADING & PROCESSING ---
+# --- DATA LOADING ---
 st.sidebar.header("Data Source")
 source_option = st.sidebar.radio("Select Source:", ["Google Sheet (Live)", "Upload Excel File", "Use Demo Data"])
 
@@ -185,7 +206,6 @@ SHEET_ID = "13Um7uOhz_zAAvMqCpfO-tppyZPoRT6RK"
 if source_option == "Google Sheet (Live)":
     if st.sidebar.button("🔄 Refresh Data"):
         st.cache_data.clear()
-    
     with st.spinner('Fetching data from Google Sheets...'):
         excel_file = fetch_google_sheet(SHEET_ID)
         if excel_file:
@@ -208,147 +228,150 @@ elif source_option == "Upload Excel File":
 else:
     data_sheets = get_mock_data()
 
-# Combine all data for Master View
 master_df = pd.DataFrame()
 if data_sheets:
     master_df = pd.concat(data_sheets.values(), ignore_index=True)
 
 # --- DASHBOARD LOGIC ---
 
+# 1. Main Header
+st.markdown('<div class="main-header">Civil Works Dashboard</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Kataram Division - Summary Overview</div>', unsafe_allow_html=True)
+
 if st.session_state.view == 'Home':
-    # === HOME VIEW: CM DASHBOARD ===
-    
-    st.markdown('<div class="main-header">CIVIL WORKS SUMMARY</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">Kataram Division Overview</div>', unsafe_allow_html=True)
-
     if master_df.empty:
-        st.warning("No data available. Please check the data source.")
+        st.warning("No data available.")
     else:
-        # 1. Global KPIs
-        total_projects = len(master_df)
-        total_investment = master_df["Normalized Budget"].sum()
-        
-        # Count issues (non-empty, non-nan, non-dash)
-        issues_df = master_df[
-            (master_df["Issues"].str.len() > 1) & 
-            (master_df["Issues"].str.lower() != "nan") & 
-            (master_df["Issues"].str.strip() != "-")
-        ]
-        total_issues = len(issues_df)
-        
-        completed_total = len(master_df[master_df["Status Label"] == "Completed"])
-        completion_rate = int((completed_total / total_projects * 100)) if total_projects > 0 else 0
+        # Create Tabs
+        tab_summary, tab_priority = st.tabs(["📊 Summary", "🔥 High Priority Projects"])
 
-        # KPI Row
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Total Projects", total_projects)
-        k2.metric("Total Investment", f"₹{total_investment:,.0f} Lakhs")
-        k3.metric("Overall Completion", f"{completion_rate}%", f"{completed_total} Works")
-        k4.metric("Critical Issues", total_issues, delta_color="inverse")
+        with tab_summary:
+            # KPIS
+            total_projects = len(master_df)
+            total_investment = master_df["Normalized Budget"].sum()
+            issues_df = master_df[
+                (master_df["Issues"].str.len() > 1) & 
+                (master_df["Issues"].str.lower() != "nan") & 
+                (master_df["Issues"].str.strip() != "-")
+            ]
+            total_issues = len(issues_df)
+            completed_total = len(master_df[master_df["Status Label"] == "Completed"])
+            completion_rate = int((completed_total / total_projects * 100)) if total_projects > 0 else 0
 
-        st.divider()
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Total Projects", total_projects)
+            k2.metric("Total Investment", f"₹{total_investment:,.0f} Lakhs")
+            k3.metric("Overall Completion", f"{completion_rate}%", f"{completed_total} Works")
+            k4.metric("Total Issues", total_issues, delta_color="inverse")
 
-        # 2. Department Comparison Charts
-        c1, c2 = st.columns(2)
-        
-        with c1:
-            st.subheader("💰 Budget Allocation by Dept")
-            budget_by_dept = master_df.groupby("Department")["Normalized Budget"].sum().reset_index()
-            fig_budget = px.bar(
-                budget_by_dept, 
-                x="Department", 
-                y="Normalized Budget",
-                text="Normalized Budget",
-                color="Department",
-                title=""
-            )
-            fig_budget.update_traces(texttemplate='₹%{text:.2s}', textposition='outside')
-            st.plotly_chart(fig_budget, use_container_width=True)
+            st.divider()
 
-        with c2:
-            st.subheader("📊 Project Status by Dept")
-            status_by_dept = master_df.groupby(["Department", "Status Label"]).size().reset_index(name="Count")
+            # Charts
+            c1, c2 = st.columns(2)
             
-            color_map = {"Completed": "#28a745", "In Progress": "#dc3545"}
-            
-            fig_status = px.bar(
-                status_by_dept,
-                x="Department",
-                y="Count",
-                color="Status Label",
-                color_discrete_map=color_map,
-                barmode="stack",
-                title=""
-            )
-            st.plotly_chart(fig_status, use_container_width=True)
-
-        st.divider()
-
-        # 3. Department Drill-Down Buttons
-        st.subheader("📂 Department Details")
-        st.caption("Click a department below to view detailed reports.")
-        
-        dept_list = list(data_sheets.keys())
-        
-        # Create a grid of buttons (3 per row)
-        cols = st.columns(4)
-        for i, dept in enumerate(dept_list):
-            with cols[i % 4]:
-                # Calculate small stats for the button label
-                d_rows = len(data_sheets[dept])
-                d_budget = data_sheets[dept]["Normalized Budget"].sum()
+            with c1:
+                st.subheader("💰 Budget Allocation by Dept")
+                budget_by_dept = master_df.groupby("Department")["Normalized Budget"].sum().reset_index()
+                total_budget_val = budget_by_dept["Normalized Budget"].sum()
+                budget_by_dept["Percentage"] = (budget_by_dept["Normalized Budget"] / total_budget_val * 100).fillna(0)
+                budget_by_dept["Label"] = budget_by_dept.apply(lambda x: f"₹{x['Normalized Budget']:,.0f}L<br>({x['Percentage']:.1f}%)", axis=1)
                 
-                if st.button(f"{dept}\n({d_rows} Works)", key=f"btn_{dept}", help=f"Budget: ₹{d_budget:,.0f} Lakhs"):
-                    switch_view('Department', dept)
-                    st.rerun()
+                fig_budget = px.bar(budget_by_dept, x="Department", y="Normalized Budget", text="Label", color="Department", title="")
+                fig_budget.update_traces(textposition='outside')
+                st.plotly_chart(fig_budget, use_container_width=True)
 
-        # # 4. Critical Issues Section
-        # if total_issues > 0:
-        #     st.markdown("---")
-        #     st.subheader("⚠️ Critical Issues Alert")
+            with c2:
+                st.subheader("📊 Project Status by Dept")
+                status_by_dept = master_df.groupby(["Department", "Status Label"]).size().reset_index(name="Count")
+                dept_totals = status_by_dept.groupby("Department")["Count"].transform("sum")
+                status_by_dept["Percentage"] = (status_by_dept["Count"] / dept_totals * 100).fillna(0)
+                status_by_dept["Label"] = status_by_dept.apply(lambda x: f"{x['Count']}<br>({x['Percentage']:.0f}%)", axis=1)
+                
+                color_map = {"Completed": "#28a745", "In Progress": "#dc3545", "N/A": "#6c757d"}
+                fig_status = px.bar(status_by_dept, x="Department", y="Count", color="Status Label", color_discrete_map=color_map, text="Label", barmode="stack", title="")
+                fig_status.update_traces(textposition='inside', insidetextanchor='middle')
+                st.plotly_chart(fig_status, use_container_width=True)
+
+            st.subheader("⚠️ Issues by Department")
+            if not issues_df.empty:
+                issues_count = issues_df.groupby("Department").size().reset_index(name="Count")
+                total_issues_val = issues_count["Count"].sum()
+                issues_count["Percentage"] = (issues_count["Count"] / total_issues_val * 100).fillna(0)
+                issues_count["Label"] = issues_count.apply(lambda x: f"{x['Count']}<br>({x['Percentage']:.1f}%)", axis=1)
+                
+                fig_issues = px.bar(issues_count, x="Department", y="Count", color="Department", text="Label", title="")
+                fig_issues.update_traces(textposition='outside')
+                st.plotly_chart(fig_issues, use_container_width=True)
+            else:
+                st.info("No reported issues found.")
             
-        #     # Show top 5 issues
-        #     issues_display = issues_df[["Department", "Work Name", "Issues", "Mandal"]].head(5)
-        #     st.dataframe(
-        #         issues_display, 
-        #         use_container_width=True, 
-        #         hide_index=True
-        #     )
+            st.divider()
+            st.subheader("📂 Department Details")
+            dept_list = list(data_sheets.keys())
+            cols = st.columns(4)
+            for i, dept in enumerate(dept_list):
+                with cols[i % 4]:
+                    d_rows = len(data_sheets[dept])
+                    if st.button(f"{dept}\n({d_rows} Works)", key=f"btn_{dept}"):
+                        switch_view('Department', dept)
+                        st.rerun()
+
+        with tab_priority:
+            st.subheader("🔥 High Priority Projects (All Departments)")
+            priority_df = master_df[master_df["Priority"] == 1]
+            
+            if priority_df.empty:
+                st.info("No projects marked as High Priority (Priority = 1).")
+            else:
+                # Column Config for Tables
+                common_col_config = {
+                    "Work Name": st.column_config.TextColumn("Work Name", width="large", help="Name of the project"),
+                    "Sl. No.": st.column_config.NumberColumn("Sl. No.", width="small"),
+                    "Department": st.column_config.TextColumn("Dept", width="small"),
+                    "Status Label": st.column_config.TextColumn("Status", width="medium"),
+                    "Issues": st.column_config.TextColumn("Issues", width="medium"),
+                }
+                
+                # Order columns: Work Name first
+                cols_to_show = ["Sl. No.", "Work Name", "Department", "Village", "Mandal", "Status Label", "Budget (Lakhs)", "Issues", "Contractor"]
+                existing_cols = [c for c in cols_to_show if c in priority_df.columns]
+                
+                st.dataframe(
+                    priority_df[existing_cols],
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config=common_col_config
+                )
 
 elif st.session_state.view == 'Department':
-    # === DEPARTMENT VIEW ===
-    
     dept = st.session_state.selected_dept
     df = data_sheets.get(dept, pd.DataFrame())
 
     if df.empty:
-        st.error(f"No data found for department: {dept}")
+        st.error("No data found.")
         if st.button("⬅️ Back"):
             switch_view('Home')
             st.rerun()
     else:
-        # Header Row with Back Button
         h1, h2 = st.columns([1, 5])
         with h1:
             if st.button("⬅️ Back"):
                 switch_view('Home')
                 st.rerun()
         with h2:
-            st.title(f"{dept} Department Report")
+            st.title(f"{dept} Department")
 
         # Filters
-        f1, f2, f3 = st.columns(3)
-        
-        mandals = ["All"] + sorted(df["Mandal"].dropna().astype(str).unique().tolist()) if "Mandal" in df.columns else ["All"]
+        f1, f2, f3, f4 = st.columns(4)
+        mandals = ["All"] + sorted(df["Mandal"].unique().tolist()) if "Mandal" in df.columns else ["All"]
         sel_mandal = f1.selectbox("Filter by Mandal", mandals)
-        
-        show_pending = f2.toggle("Pending / In Progress Only")
-        show_issues = f3.toggle("Has Issues Only")
+        show_pending = f2.toggle("Pending Only")
+        show_issues = f3.toggle("Issues Only")
+        show_priority = f4.toggle("⭐ Priority Only") # New Priority Toggle
 
-        # Filter Logic
         filtered_df = df.copy()
         if sel_mandal != "All":
-            filtered_df = filtered_df[filtered_df["Mandal"].astype(str) == sel_mandal]
+            filtered_df = filtered_df[filtered_df["Mandal"] == sel_mandal]
         if show_pending:
             filtered_df = filtered_df[filtered_df["Status Label"] != "Completed"]
         if show_issues and "Issues" in filtered_df.columns:
@@ -357,73 +380,67 @@ elif st.session_state.view == 'Department':
                 (filtered_df["Issues"].str.lower() != "nan") & 
                 (filtered_df["Issues"].str.strip() != "-")
             ]
+        if show_priority:
+            filtered_df = filtered_df[filtered_df["Priority"] == 1]
 
-        # Dept Stats
+        # Stats
         d_total = len(filtered_df)
         d_budget = filtered_df["Normalized Budget"].sum() if "Normalized Budget" in filtered_df.columns else 0
         d_completed = len(filtered_df[filtered_df["Status Label"] == "Completed"])
         
         st.markdown("#### Snapshot")
         s1, s2, s3, s4 = st.columns(4)
-        s1.metric("Works Listed", d_total)
+        s1.metric("Works", d_total)
         s2.metric("Budget", f"₹{d_budget:,.1f} L")
         s3.metric("Completed", d_completed)
         s4.metric("Pending", d_total - d_completed)
 
-        # --- NEW: DEPARTMENT LEVEL GRAPHS ---
         st.divider()
-        st.subheader("📊 Department Analytics")
-        
+        st.subheader("📊 Analytics")
         if not filtered_df.empty:
             dc1, dc2 = st.columns(2)
-            
             with dc1:
-                # Status Breakdown
                 status_counts = filtered_df["Status Label"].value_counts().reset_index()
                 status_counts.columns = ["Status", "Count"]
-                color_map = {"Completed": "#28a745", "In Progress": "#dc3545"}
-                
-                fig_dept_pie = px.pie(
-                    status_counts, 
-                    values='Count', 
-                    names='Status', 
-                    hole=0.4,
-                    color='Status',
-                    color_discrete_map=color_map,
-                    title="Completion Status"
-                )
+                color_map = {"Completed": "#28a745", "In Progress": "#dc3545", "N/A": "#6c757d"}
+                fig_dept_pie = px.pie(status_counts, values='Count', names='Status', hole=0.4, color='Status', color_discrete_map=color_map, title="Completion Status")
+                fig_dept_pie.update_traces(textinfo='value+percent')
                 st.plotly_chart(fig_dept_pie, use_container_width=True)
-                
             with dc2:
-                # Budget by Mandal (if available)
                 if "Mandal" in filtered_df.columns and "Normalized Budget" in filtered_df.columns:
                     budget_mandal = filtered_df.groupby("Mandal")["Normalized Budget"].sum().reset_index()
-                    
-                    fig_dept_bar = px.bar(
-                        budget_mandal,
-                        x="Mandal",
-                        y="Normalized Budget",
-                        title="Budget Distribution by Mandal (Lakhs)",
-                        text="Normalized Budget"
-                    )
-                    fig_dept_bar.update_traces(texttemplate='%{text:.2s}', textposition='outside')
+                    total_dept_budget = budget_mandal["Normalized Budget"].sum()
+                    budget_mandal["Percentage"] = (budget_mandal["Normalized Budget"] / total_dept_budget * 100).fillna(0)
+                    budget_mandal["Label"] = budget_mandal.apply(lambda x: f"₹{x['Normalized Budget']:,.0f}L<br>({x['Percentage']:.1f}%)", axis=1)
+                    fig_dept_bar = px.bar(budget_mandal, x="Mandal", y="Normalized Budget", title="Budget by Mandal", text="Label")
+                    fig_dept_bar.update_traces(textposition='outside')
                     st.plotly_chart(fig_dept_bar, use_container_width=True)
-                else:
-                    st.info("Not enough data for Mandal-wise Budget analysis")
-        else:
-            st.warning("No data matches the selected filters.")
-
-        # Table
+        
         st.markdown("#### Detailed Works List")
         
-        cols_to_hide = ["Normalized Budget", "Status Label", "Department"]
-        cols_to_show = [c for c in filtered_df.columns if c not in cols_to_hide]
+        # TABLE CONFIGURATION
+        # 1. Hide Normalized Budget, Status Label, Department, Priority, Is Completed
+        cols_to_hide = ["Normalized Budget", "Status Label", "Department", "Priority", "Is Completed"]
         
+        # 2. Prioritize Column Order: Sl. No, Work Name, Village, Mandal, Status...
+        desired_order = ["Sl. No.", "Work Name", "Village", "Mandal", "Status", "Budget (Lakhs)", "Issues", "Contractor", "Sanction Date"]
+        # Add remaining columns that are not in desired_order or cols_to_hide
+        remaining_cols = [c for c in filtered_df.columns if c not in desired_order and c not in cols_to_hide]
+        
+        final_cols = [c for c in desired_order if c in filtered_df.columns] + remaining_cols
+        
+        # 3. Column Configuration
+        table_config = {
+            "Work Name": st.column_config.TextColumn("Work Name", width="large"),
+            "Sl. No.": st.column_config.NumberColumn("Sl. No.", width="small"),
+            "Status": st.column_config.TextColumn("Status", width="medium"),
+            "Issues": st.column_config.TextColumn("Issues", width="medium"),
+        }
+
         st.dataframe(
-            filtered_df[cols_to_show],
+            filtered_df[final_cols],
             use_container_width=True,
             hide_index=True,
-            height=500
-
+            height=500,
+            column_config=table_config
         )
-
